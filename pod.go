@@ -239,6 +239,9 @@ type PodConfig struct {
 	AgentType   AgentType
 	AgentConfig interface{}
 
+	NetworkModel  NetworkModel
+	NetworkConfig NetworkConfig
+
 	// Rootfs is the pod root file system in the host.
 	// This can be left empty if we only have a set of containers
 	// workload images and expect the agent to aggregate them into
@@ -352,21 +355,21 @@ func (p *Pod) createSetStates() error {
 // It will create and store the pod structure, and then ask the hypervisor
 // to physically create that pod i.e. starts a VM for that pod to eventually
 // be started.
-func createPod(podConfig PodConfig) (*Pod, error) {
+func createPod(podConfig PodConfig, netPairs []NetworkInterfacePair) (*Pod, []NetworkInterfacePair, error) {
 	if podConfig.valid() == false {
-		return nil, fmt.Errorf("Invalid pod configuration")
+		return nil, netPairs, fmt.Errorf("Invalid pod configuration")
 	}
 
 	agent := newAgent(podConfig.AgentType)
 
 	hypervisor, err := newHypervisor(podConfig.HypervisorType)
 	if err != nil {
-		return nil, err
+		return nil, netPairs, err
 	}
 
 	err = hypervisor.init(podConfig.HypervisorConfig)
 	if err != nil {
-		return nil, err
+		return nil, netPairs, err
 	}
 
 	p := &Pod{
@@ -385,13 +388,13 @@ func createPod(podConfig PodConfig) (*Pod, error) {
 
 	err = p.storage.createAllResources(*p)
 	if err != nil {
-		return nil, err
+		return nil, netPairs, err
 	}
 
 	err = p.hypervisor.createPod(podConfig)
 	if err != nil {
 		p.storage.deletePodResources(p.id, nil)
-		return nil, err
+		return nil, netPairs, err
 	}
 
 	var agentConfig interface{}
@@ -410,25 +413,25 @@ func createPod(podConfig PodConfig) (*Pod, error) {
 	err = p.agent.init(*p, agentConfig)
 	if err != nil {
 		p.storage.deletePodResources(p.id, nil)
-		return nil, err
+		return nil, netPairs, err
 	}
 
 	state, err := p.storage.fetchPodState(p.id)
 	if err == nil && state.State != "" {
-		return p, nil
+		return p, netPairs, nil
 	}
 
 	err = p.createSetStates()
 	if err != nil {
 		p.storage.deletePodResources(p.id, nil)
-		return nil, err
+		return nil, netPairs, err
 	}
 
-	return p, nil
+	return p, netPairs, nil
 }
 
 // storePod stores a pod config.
-func (p *Pod) storePod() error {
+func (p *Pod) storePod(netPairs []NetworkInterfacePair) error {
 	fs := filesystem{}
 
 	err := fs.storePodResource(p.id, configFileType, *(p.config))
@@ -443,20 +446,33 @@ func (p *Pod) storePod() error {
 		}
 	}
 
+	// Store network pairs.
+	err = fs.storePodResource(p.id, networkFileType, NetworkInterfacePairs(netPairs))
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // fetchPod fetches a pod config from a pod ID and returns a pod.
-func fetchPod(podID string) (*Pod, error) {
+func fetchPod(podID string) (*Pod, []NetworkInterfacePair, error) {
+	var netPairs []NetworkInterfacePair
+
 	fs := filesystem{}
 	config, err := fs.fetchPodConfig(podID)
 	if err != nil {
-		return nil, err
+		return nil, netPairs, err
+	}
+
+	netPairs, err = fs.fetchPodNetwork(podID)
+	if err != nil {
+		return nil, netPairs, err
 	}
 
 	glog.Infof("Info structure:\n%+v\n", config)
 
-	return createPod(config)
+	return createPod(config, netPairs)
 }
 
 // delete deletes an already created pod.
@@ -509,6 +525,10 @@ func (p *Pod) startSetStates() error {
 		return err
 	}
 
+	return nil
+}
+
+func (p *Pod) setNetwork() error {
 	return nil
 }
 

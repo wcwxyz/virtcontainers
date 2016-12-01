@@ -25,15 +25,24 @@ import (
 // CreatePod is the virtcontainers pod creation entry point.
 // CreatePod creates a pod and its containers. It does not start them.
 func CreatePod(podConfig PodConfig) (*Pod, error) {
-	// Create the pod.
-	p, err := createPod(podConfig)
+	// Create the network.
+	n := newNetwork(podConfig.NetworkModel)
+	netPairs, err := n.add(&(podConfig.NetworkConfig))
 	if err != nil {
 		return nil, err
 	}
 
-	// Store it.
-	err = p.storePod()
+	// Create the pod.
+	p, netPairs, err := createPod(podConfig, netPairs)
 	if err != nil {
+		n.remove(podConfig.NetworkConfig, netPairs)
+		return nil, err
+	}
+
+	// Store it.
+	err = p.storePod(netPairs)
+	if err != nil {
+		n.remove(podConfig.NetworkConfig, netPairs)
 		return nil, err
 	}
 
@@ -55,7 +64,14 @@ func DeletePod(podID string) (*Pod, error) {
 	defer unlockPod(lockFile)
 
 	// Fetch the pod from storage and create it.
-	p, err := fetchPod(podID)
+	p, netPairs, err := fetchPod(podID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove the network.
+	n := newNetwork(p.config.NetworkModel)
+	err = n.remove(p.config.NetworkConfig, netPairs)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +102,14 @@ func StartPod(podID string) (*Pod, error) {
 	defer unlockPod(lockFile)
 
 	// Fetch the pod from storage and create it.
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Join the network.
+	n := newNetwork(p.config.NetworkModel)
+	err = n.join(p.config.NetworkConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +138,7 @@ func StopPod(podID string) (*Pod, error) {
 	defer unlockPod(lockFile)
 
 	// Fetch the pod from storage and create it.
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,15 +161,24 @@ func StopPod(podID string) (*Pod, error) {
 // RunPod is the virtcontainers pod running entry point.
 // RunPod creates a pod and its containers and then it starts them.
 func RunPod(podConfig PodConfig) (*Pod, error) {
-	// Create the pod.
-	p, err := createPod(podConfig)
+	// Create the network.
+	n := newNetwork(podConfig.NetworkModel)
+	netPairs, err := n.add(&(podConfig.NetworkConfig))
 	if err != nil {
 		return nil, err
 	}
 
-	// Store it.
-	err = p.storePod()
+	// Create the pod.
+	p, netPairs, err := createPod(podConfig, netPairs)
 	if err != nil {
+		n.remove(podConfig.NetworkConfig, netPairs)
+		return nil, err
+	}
+
+	// Store it.
+	err = p.storePod(netPairs)
+	if err != nil {
+		n.remove(podConfig.NetworkConfig, netPairs)
 		return nil, err
 	}
 
@@ -155,6 +187,12 @@ func RunPod(podConfig PodConfig) (*Pod, error) {
 		return nil, err
 	}
 	defer unlockPod(lockFile)
+
+	// Join the network.
+	err = n.join(podConfig.NetworkConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	// Start it.
 	err = p.start()
@@ -258,7 +296,7 @@ func CreateContainer(podID string, containerConfig ContainerConfig) (*Container,
 	}
 	defer unlockPod(lockFile)
 
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +339,7 @@ func DeleteContainer(podID, containerID string) (*Container, error) {
 	}
 	defer unlockPod(lockFile)
 
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +386,7 @@ func StartContainer(podID, containerID string) (*Container, error) {
 	}
 	defer unlockPod(lockFile)
 
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +421,7 @@ func StopContainer(podID, containerID string) (*Container, error) {
 	}
 	defer unlockPod(lockFile)
 
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +456,7 @@ func EnterContainer(podID, containerID string, cmd Cmd) (*Container, error) {
 	}
 	defer unlockPod(lockFile)
 
-	p, err := fetchPod(podID)
+	p, _, err := fetchPod(podID)
 	if err != nil {
 		return nil, err
 	}
