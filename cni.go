@@ -19,6 +19,8 @@ package virtcontainers
 import (
 	"fmt"
 	"path/filepath"
+
+	"github.com/containernetworking/cni/pkg/ns"
 )
 
 // cni is a network implementation for the CNI plugin.
@@ -69,6 +71,13 @@ func (n *cni) add(config *NetworkConfig) ([]NetworkInterfacePair, error) {
 		return netPairs, err
 	}
 
+	for _, pair := range netPairs {
+		err = bridgeNetworkPair(pair)
+		if err != nil {
+			return netPairs, err
+		}
+	}
+
 	return netPairs, nil
 }
 
@@ -86,10 +95,16 @@ func (n *cni) join(config NetworkConfig) error {
 // remove unbridges and deletes TAP interfaces. It also removes virtual network
 // interfaces and deletes the network namespace for the CNI network.
 func (n *cni) remove(config NetworkConfig, netPairs []NetworkInterfacePair) error {
-	err := setNetNS(config.NetNSPath)
-	if err != nil {
-		return err
-	}
+	err := doNetNS(config.NetNSPath, func(_ ns.NetNS) error {
+		for _, pair := range netPairs {
+			err := unBridgeNetworkPair(pair)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 
 	err = n.deleteVirtInterfaces(config, netPairs)
 	if err != nil {
