@@ -166,6 +166,22 @@ func (q *qemu) appendSocket(devices []ciaoQemu.Device, socket Socket) []ciaoQemu
 	return devices
 }
 
+func (q *qemu) appendNetworks(devices []ciaoQemu.Device, netPairs []NetworkInterfacePair) []ciaoQemu.Device {
+	for _, pair := range netPairs {
+		devices = append(devices,
+			ciaoQemu.NetDevice{
+				Type:       ciaoQemu.TAP,
+				Driver:     ciaoQemu.VirtioNet,
+				ID:         fmt.Sprintf("network%s", pair.ID),
+				IFName:     pair.TAPIface.Name,
+				MACAddress: pair.VirtIface.HardAddr.String(),
+			},
+		)
+	}
+
+	return devices
+}
+
 func (q *qemu) appendFSDevices(devices []ciaoQemu.Device, podConfig PodConfig) []ciaoQemu.Device {
 	if podConfig.ID != "" {
 		// Add the pod rootfs
@@ -404,7 +420,7 @@ func (q *qemu) setMemoryResources(podConfig PodConfig) ciaoQemu.Memory {
 }
 
 // createPod is the Hypervisor pod creation implementation for ciaoQemu.
-func (q *qemu) createPod(podConfig PodConfig) error {
+func (q *qemu) createPod(podConfig PodConfig, netPairs []NetworkInterfacePair) error {
 	var devices []ciaoQemu.Device
 
 	machine := ciaoQemu.Machine{
@@ -464,6 +480,8 @@ func (q *qemu) createPod(podConfig PodConfig) error {
 	if err != nil {
 		return err
 	}
+
+	devices = q.appendNetworks(devices, netPairs)
 
 	qemuConfig := ciaoQemu.Config{
 		Name:        fmt.Sprintf("pod-%s", podConfig.ID),

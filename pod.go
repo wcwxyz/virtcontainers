@@ -391,7 +391,7 @@ func createPod(podConfig PodConfig, netPairs []NetworkInterfacePair) (*Pod, []Ne
 		return nil, netPairs, err
 	}
 
-	err = p.hypervisor.createPod(podConfig)
+	err = p.hypervisor.createPod(podConfig, netPairs)
 	if err != nil {
 		p.storage.deletePodResources(p.id, nil)
 		return nil, netPairs, err
