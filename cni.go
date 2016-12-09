@@ -17,27 +17,45 @@
 package virtcontainers
 
 import (
-	"fmt"
-	"path/filepath"
-
 	"github.com/containernetworking/cni/pkg/ns"
+	cniPlugin "github.com/containers/virtcontainers/network/cni"
+	"github.com/golang/glog"
 )
 
 // cni is a network implementation for the CNI plugin.
-type cni struct {
-	config NetworkConfig
-}
+type cni struct{}
 
-func (n *cni) addVirtInterfaces(netConfig NetworkConfig, netPairs []NetworkInterfacePair) error {
-	_, nsName := filepath.Split(netConfig.NetNSPath)
-	if nsName == "" {
-		return fmt.Errorf("Invalid namespace name")
+func (n *cni) addVirtInterfaces(config NetworkConfig, netPairs []NetworkInterfacePair) error {
+	netPlugin, err := cniPlugin.NewNetworkPlugin()
+	if err != nil {
+		return err
+	}
+
+	for _, pair := range netPairs {
+		res, err := netPlugin.AddNetwork(pair.ID, config.NetNSPath, pair.VirtIface.Name)
+		if err != nil {
+			return err
+		}
+
+		glog.Infof("AddNetwork results %v\n", res)
 	}
 
 	return nil
 }
 
-func (n *cni) deleteVirtInterfaces(netConfig NetworkConfig, netPairs []NetworkInterfacePair) error {
+func (n *cni) deleteVirtInterfaces(config NetworkConfig, netPairs []NetworkInterfacePair) error {
+	netPlugin, err := cniPlugin.NewNetworkPlugin()
+	if err != nil {
+		return err
+	}
+
+	for _, pair := range netPairs {
+		err := netPlugin.RemoveNetwork(pair.ID, config.NetNSPath, pair.VirtIface.Name)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
